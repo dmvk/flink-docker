@@ -16,7 +16,7 @@
 # limitations under the License.
 ###############################################################################
 
-FROM %%FROM_IMAGE%%
+FROM %%FROM_IMAGE%% as builder
 
 # Install dependencies
 RUN set -ex; \
@@ -79,6 +79,66 @@ RUN set -ex; \
   rm flink.tgz; \
   \
   chown -R flink:flink .;
+
+# Prepare slimmed down version
+RUN set -ex; \
+  cp -r /opt/flink /opt/flink-slim; \
+  rm -r /opt/flink-slim/examples; \
+  rm -r /opt/flink-slim/opt;
+
+###############################################################################
+# Fat image.
+###############################################################################
+
+FROM %%FROM_IMAGE%% as fat
+
+# Install dependencies
+RUN set -ex; \
+  apt-get update; \
+  apt-get -y install libsnappy1v5 gettext-base libjemalloc-dev; \
+  rm -rf /var/lib/apt/lists/*
+
+# Prepare environment
+ENV FLINK_HOME=/opt/flink
+ENV PATH=$FLINK_HOME/bin:$PATH
+RUN groupadd --system --gid=9999 flink && \
+    useradd --system --home-dir $FLINK_HOME --uid=9999 --gid=flink flink
+WORKDIR $FLINK_HOME
+
+# Copy artifacts from builder
+COPY --from=builder /usr/local/bin/gosu /usr/local/bin/gosu
+COPY --from=builder /opt/flink /opt/flink
+RUN gosu nobody true
+
+# Configure container
+COPY docker-entrypoint.sh /
+ENTRYPOINT ["/docker-entrypoint.sh"]
+EXPOSE 6123 8081
+CMD ["help"]
+
+###############################################################################
+# Slim image.
+###############################################################################
+
+FROM %%FROM_IMAGE%%-slim as slim
+
+# Install dependencies
+RUN set -ex; \
+  apt-get update; \
+  apt-get -y install libsnappy1v5 gettext-base libjemalloc-dev; \
+  rm -rf /var/lib/apt/lists/*
+
+# Prepare environment
+ENV FLINK_HOME=/opt/flink
+ENV PATH=$FLINK_HOME/bin:$PATH
+RUN groupadd --system --gid=9999 flink && \
+    useradd --system --home-dir $FLINK_HOME --uid=9999 --gid=flink flink
+WORKDIR $FLINK_HOME
+
+# Copy artifacts from builder
+COPY --from=builder /usr/local/bin/gosu /usr/local/bin/gosu
+COPY --from=builder /opt/flink-slim /opt/flink
+RUN gosu nobody true
 
 # Configure container
 COPY docker-entrypoint.sh /
